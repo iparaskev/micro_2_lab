@@ -12,7 +12,6 @@
 
 	; Interrupt vector for atmega16
 	jmp reset
-	jmp adc_handler        ; ADC Conversion Complete Handler
 	reti                   ; Store Program Memory Ready Handler
 
 adc_func:
@@ -32,20 +31,20 @@ adc_func:
 	ldi tmp, 0b11001111
 	out adcsra, tmp
 	
-	; Sleep until the end of conversion
-	sleep 
-	ret
-	
-adc_handler:
-	; Handler for the interrupt after the adc conversion
+wait_adc:
+	sbic adcsra, 6
+	rjmp wait_adc
+
+	; Get results
 	ldi pot_res_l, adcl
 	ldi pot_res_h, adch
-	
+
 	; Hardware print for the end of conversion
-	ldi tmp, 0x00
+	clr tmp
 	out portb, tmp
 
-	reti
+	ret
+
 
 reset:
 	; Initialize stack pointer
