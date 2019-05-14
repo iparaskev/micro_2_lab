@@ -3,6 +3,7 @@
 .def timer_init_l = r4
 .def timer_init_h = r5
 .def timer_flag = r24
+.def lower_flag = r25
 .def tmp = r16
 .def timer_start_l = r17
 .def timer_start_h = r18
@@ -15,7 +16,7 @@
 
 ; TODO: Debug on real hardware
 ; Debug steps: 
-;        - If interrupt works
+;        - Real time of timer
 
 	; Interrupt vector for atmega16
 	rjmp reset
@@ -27,7 +28,6 @@ adc_func:
 	; Function to read from the adc
 	; Inputs:  
 	;	pot_ind   register to choose potentiometer
-	;       pot_mode  register with the mode of adc
 	; Outputs:
 	;	pot_res_l low byte of adc measurment
 	;       pot_res_h hight byte with adc measurment
@@ -111,6 +111,44 @@ timer_handler:
 	ldi timer_flag, 1
 	reti
 
+check_low:
+	; Function to check if adc_value is above a value and return true or 
+	; false. 
+
+	; Load constant
+	ldi zh, high(Low_value*2)
+	ldi zl, low(Low_value*2)
+	
+	; Check high byte
+	adiw zl, 1
+	lpm
+	cp pot_res_h, r0
+	brlo lower
+
+	; Check low byte
+	sbiw zl, 1
+	lpm 
+	cp pot_res_l, r0
+	brlo lower
+higher:
+	ldi lower_flag, 0
+	rjmp end_check
+lower:
+	ldi lower_flag, 1
+end_check:
+	ret
+
+check_A1:
+	; Function to get the value of A1 sensor
+	; Get measurment
+	ldi pot_ind, 0
+	rcall adc_func
+	rcall check_low
+	sbrc lower_flag, 0
+	rjmp alarm
+	ret
+alarm: 
+	; Alarm
 reset:
 	; Initialize stack pointer
 	ldi tmp, high(ramend)
@@ -129,8 +167,19 @@ reset:
 	out ddrb, tmp
 
 main:
-	ldi secs, 3
-	rcall timer
 
+	; Timer check
+	ldi secs, 3
+	ldi tmp, 0x00
+	out portb, tmp
+	rcall timer
+	ldi tmp, 0xFF
+	out portb, tmp
+
+	; A1 check
+	rcall check_A1
 Clock_freq:
 .DW 0x0f42
+
+Low_value:
+.DW 0x0001
