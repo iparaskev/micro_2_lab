@@ -1,18 +1,27 @@
 .include "m16def.inc"
 
+.def timer_init_l = r4
+.def timer_init_h = r5
+.def timer_flag = r24
 .def tmp = r16
+.def timer_start_l = r17
+.def timer_start_h = r18
 .def pot_ind = r19    ; Variable to choose potentiometer
 .def pot_mode = r20   ; The first bits of the admux register
 .def pot_res_l = r21
 .def pot_res_h = r22
+.def secs = r23        ; The delay seconds for the timer
+
 
 ; TODO: Debug on real hardware
 ; Debug steps: 
 ;        - If interrupt works
 
 	; Interrupt vector for atmega16
-	jmp reset
-	reti                   ; Store Program Memory Ready Handler
+	rjmp reset
+	.org 0x0012
+	rjmp timer_handler
+	reti
 
 adc_func:
 	; Function to read from the adc
@@ -45,6 +54,62 @@ wait_adc:
 
 	ret
 
+timer:
+	; Set timer for specific delay
+	; Input:
+	;	sec	the delay time 
+
+	; Load number of commands per sec for prescaler=1024
+	; Initial clock freq is 4MHz so the new clock freq is 3096Hz
+	ldi zh, high(Clock_freq*2)
+	ldi zl, low(Clock_freq*2)
+
+	; Multiply first byte with the seconds
+	lpm
+	mov tmp, r0
+	adiw zl, 1
+	mul tmp, secs
+	movw timer_init_l, r0
+
+	; Multiply second byte with the seconds
+	lpm
+	mov tmp, r0
+	mul tmp, secs
+	
+	; Add low byte to the high byte
+	add timer_init_h, r0
+
+	ldi timer_start_l, 0xFF
+	ldi timer_start_h, 0xFF
+	
+	; Initial value for the counter to start
+	sub timer_start_l, timer_init_l
+	sbc timer_start_h, timer_init_h
+
+	out tcnt1l, timer_start_l
+	out tcnt1h, timer_start_h
+
+	; Initiliaze general timer interrupts
+	ldi tmp, 0b00000100
+	out timsk, tmp
+
+	; Set mode of the counter
+	ldi tmp, 0b00000101
+	out tccr1b, tmp
+
+loop:
+	sbrs timer_flag, 0
+	rjmp loop
+	
+	; Reset timer flag
+	ldi timer_flag, 0
+
+	ret
+	
+timer_handler:
+	; Handle timer interrupt 
+	ldi timer_flag, 1
+	reti
 
 reset:
 	; Initialize stack pointer
@@ -64,17 +129,8 @@ reset:
 	out ddrb, tmp
 
 main:
-	ldi pot_ind, 0	
-	rcall adc_func
+	ldi secs, 3
+	rcall timer
 
-	ldi pot_ind, 1
-	rcall adc_func
-
-	ldi pot_ind, 2
-	rcall adc_func
-
-	ldi pot_ind, 3
-	rcall adc_func
-
-	ldi pot_ind, 4
-	rcall adc_func
+Clock_freq:
+.DW 0x0f42
