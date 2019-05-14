@@ -68,15 +68,29 @@ start_tape:
 
 ; 7 sec_timer
 
+start_m1:
+	; start the product loading in silos if sw4 and sw5 are not pressed
+	sbic portd, 4
+	rjmp alarm
+	sbic portd, 5
+	rjmp alarm
 
-; read sw4, sw5
-in temp, portd
-; check if bit 4,5 are 0
+load_silo_1:
+	ldi pot_ind, 2
+	rcall adc_read
+	rcall check_low
+	sbrc lower_flag, 0
+	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
 
-; while silo 1 is not full
-; if b2 is triggered go to silo 2
+; switch the pump Y2
 
-; when silo 2 is filled, b4 is triggered
-; stop engine
+load_silo_2:
+	ldi pot_ind, 4
+	rcall adc_read
+	rcall check_low
+	sbrc lower_flag, 0
+	rjmp load_silo_1; while b4 is lower than a threshold, keep loading silo 2
+	
+; when silo 2 is filled stop engines
 
 
