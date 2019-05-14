@@ -45,8 +45,8 @@ wait_adc:
 	rjmp wait_adc
 
 	; Get results
-	ldi pot_res_l, adcl
-	ldi pot_res_h, adch
+	in pot_res_l, adcl
+	in pot_res_h, adch
 
 	; Hardware print for the end of conversion
 	clr tmp
