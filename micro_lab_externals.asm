@@ -14,14 +14,12 @@
 .def secs = r23        ; The delay seconds for the timer
 
 
-; TODO: Debug on real hardware
-; Debug steps: 
-;        - Real time of timer
-
 	; Interrupt vector for atmega16
-	rjmp reset
+	jmp reset
+	.org 0x0010
+	jmp timer_handler
 	.org 0x0012
-	rjmp timer_handler
+	jmp error_timer	
 	reti
 
 adc_func:
@@ -30,14 +28,14 @@ adc_func:
 	;	pot_ind   register to choose potentiometer
 	; Outputs:
 	;	pot_res_l low byte of adc measurment
-	;       pot_res_h hight byte with adc measurment
+	;   pot_res_h hight byte with adc measurment
 
 	; Initialize adc
 	or pot_ind, pot_mode
 	out admux, pot_ind
 
 	; Start conversion
-	ldi tmp, 0b11001111
+	ldi tmp, 0b11000111
 	out adcsra, tmp
 	
 wait_adc:
@@ -47,10 +45,6 @@ wait_adc:
 	; Get results
 	in pot_res_l, adcl
 	in pot_res_h, adch
-
-	; Hardware print for the end of conversion
-	clr tmp
-	out portb, tmp
 
 	ret
 
@@ -89,12 +83,8 @@ timer:
 	out tcnt1l, timer_start_l
 	out tcnt1h, timer_start_h
 
-	; Initiliaze general timer interrupts
-	ldi tmp, 0b00000100
-	out timsk, tmp
-
 	; Set mode of the counter
-	ldi tmp, 0b00000101
+	ldi tmp, 0b00000100
 	out tccr1b, tmp
 
 loop:
@@ -103,7 +93,7 @@ loop:
 	
 	; Reset timer flag
 	ldi timer_flag, 0
-
+	
 	ret
 	
 timer_handler:
@@ -147,8 +137,50 @@ check_A1:
 	sbrc lower_flag, 0
 	rjmp alarm
 	ret
+
 alarm: 
 	; Alarm
+	; Start buzzer
+	ldi tmp, 0b00000001
+	out portc, tmp
+ack:
+	; Wait until the sw6 has been pressed
+	sbic pind, 6
+	rjmp ack
+
+	clr tmp
+	out portc, tmp
+error:
+	; Light error led
+	ldi secs, 5
+	ldi tmp, 0b11111110
+	out portb, tmp
+	rcall timer
+
+	ser tmp
+	out portb, tmp
+	rcall timer
+	;sbic pind, 6
+	rjmp error
+	ret 
+
+check_for_errors:
+	; Check if potentiometer 0 is ok
+	rcall check_A1
+	; Check q1
+	sbis pind, 4
+	rcall alarm
+	; Check q2
+	sbis pind, 5
+	rcall alarm
+	ret
+
+error_timer:
+	; Handler to call again check_for_errors
+	sei
+	rcall check_for_errors
+	reti
+
 reset:
 	; Initialize stack pointer
 	ldi tmp, high(ramend)
@@ -163,23 +195,47 @@ reset:
 	ldi pot_mode, 0b11000000
 
 	; Initialize leds
-	ldi tmp, 0xFF
+	ser tmp
 	out ddrb, tmp
+
+	; Button
+	out ddrc, tmp
+
+	; Initialize buttons
+	clr tmp
+	out ddrd, tmp
+	
+	; Initiliaze general timer interrupts
+	ldi tmp, 0b00000101
+	out timsk, tmp
+
+	; Start timer for error checking
+	clr tmp
+	out tcnt0, tmp
+	ldi tmp, 0b00000101
+	out tccr0, tmp
 
 main:
 
 	; Timer check
-	ldi secs, 3
-	ldi tmp, 0x00
+	ldi tmp, 0b10101010
 	out portb, tmp
+
+	ldi secs, 3
 	rcall timer
+
 	ldi tmp, 0xFF
 	out portb, tmp
-
+	ldi secs, 5
+	rcall timer
 	; A1 check
-	rcall check_A1
+	;rcall check_A1
+	;rcall alarm
+	;rcall check_for_errors
+
+
 Clock_freq:
-.DW 0x0f42
+.DW 0x3d09
 
 Low_value:
-.DW 0x0001
+.DW 0x0000
