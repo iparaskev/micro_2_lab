@@ -12,15 +12,103 @@
 .def pot_res_l = r21
 .def pot_res_h = r22
 .def secs = r23        ; The delay seconds for the timer
+.def timer_count = r26
 
+; Interrupt vector for atmega16
+jmp reset
+.org 0x0010
+jmp timer_handler
+.org 0x0012
+jmp error_timer	
+reti
 
-	; Interrupt vector for atmega16
-	jmp reset
-	.org 0x0010
-	jmp timer_handler
-	.org 0x0012
-	jmp error_timer	
-	reti
+wait_start:
+	; wait for the switch 0 to be pushed
+	
+	clr tmp
+	out portb, tmp
+	in tmp, portd
+	sbic PIND, 0
+	rjmp wait_start
+	ser tmp
+	out portb, tmp
+
+start_tape:
+	; check if the required conditions are met and start the production tape
+	; condition 1: b1 = 0
+	ldi pot_ind, 1
+	rcall adc_func ; read b1 value
+	rcall check_low
+	sbrc lower_flag, 0 ; if silo 1 is empty skip horn
+	rjmp wait_start
+	
+	; condition 2: b3 = 0
+	ldi pot_ind, 3
+	rcall adc_func ; read b3 value
+	rcall check_low
+	sbrc lower_flag, 0; if silo 2 is empty skip horn
+	rjmp wait_start
+
+	; condition 3: a1 > 0
+	;rcall check_A1
+	
+	; condition 4: b2 = 0 or b4 = 0
+	ldi pot_ind, 2
+	rcall adc_func ; read b2
+	rcall check_low
+	mov tmp, lower_flag
+	
+	ldi pot_ind, 4
+	rcall adc_func ; read b4
+	rcall check_low 
+	or tmp, lower_flag
+
+	sbrs tmp, 0 ; if the first bit of the or result is 1, skip horn
+	rjmp wait_start
+
+	;condition 5: Q2 = 0
+	;rcall check_for_errors
+
+	; if all conditions are met, open led7
+	ldi tmp, 0b01111111
+	out portb, tmp
+
+; 7 sec_timer
+	ldi secs, 7
+	rcall timer
+	
+	ldi tmp, 0b00111111
+	out portb, tmp
+	ldi secs, 3
+	rcall timer
+
+load_silo_1:
+	ldi pot_ind, 2
+	rcall adc_func
+	rcall check_low
+	;sbrc lower_flag, 1
+	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
+
+; switch the pump Y2
+
+load_silo_2:
+	ldi pot_ind, 4
+	rcall adc_func
+	rcall check_low
+	sbrc lower_flag, 1
+	rjmp load_silo_1; while b4 is lower than a threshold, keep loading silo 2
+	
+stop_engines:
+	; when silo 2 is filled stop engines
+	ldi tmp, 0b01010101
+	out portb, tmp
+	ldi secs, 2
+	rcall timer
+	com tmp
+	out portb, tmp
+	rcall timer
+	rjmp stop_engines
+
 
 adc_func:
 	; Function to read from the adc
@@ -57,21 +145,13 @@ timer:
 	; Initial clock freq is 4MHz so the new clock freq is 3096Hz
 	ldi zh, high(Clock_freq*2)
 	ldi zl, low(Clock_freq*2)
-
-	; Multiply first byte with the seconds
-	lpm
-	mov tmp, r0
-	adiw zl, 1
-	mul tmp, secs
-	movw timer_init_l, r0
-
-	; Multiply second byte with the seconds
-	lpm
-	mov tmp, r0
-	mul tmp, secs
 	
-	; Add low byte to the high byte
-	add timer_init_h, r0
+	; Load 1 sec
+	lpm
+	mov timer_init_l, r0
+	adiw zl, 1
+	lpm
+	mov timer_init_h, r0
 
 	ldi timer_start_l, 0xFF
 	ldi timer_start_h, 0xFF
@@ -79,7 +159,10 @@ timer:
 	; Initial value for the counter to start
 	sub timer_start_l, timer_init_l
 	sbc timer_start_h, timer_init_h
+	
+	ldi timer_count, 0
 
+start_count:
 	out tcnt1l, timer_start_l
 	out tcnt1h, timer_start_h
 
@@ -93,6 +176,10 @@ loop:
 	
 	; Reset timer flag
 	ldi timer_flag, 0
+
+	inc timer_count
+	cp  timer_count, secs
+	brlo start_count
 	
 	ret
 	
@@ -104,10 +191,11 @@ timer_handler:
 check_low:
 	; Function to check if adc_value is above a value and return true or 
 	; false. 
+	ldi lower_flag, 0
 
 	; Load constant
-	ldi zh, high(Low_value*2)
-	ldi zl, low(Low_value*2)
+	ldi zh, high(Values*2)
+	ldi zl, low(Values*2)
 	
 	; Check high byte
 	adiw zl, 1
@@ -121,10 +209,29 @@ check_low:
 	cp pot_res_l, r0
 	brlo lower
 higher:
-	ldi lower_flag, 0
-	rjmp end_check
+	rjmp high_check
 lower:
 	ldi lower_flag, 1
+
+	; Load constant
+high_check:
+	
+	; Check high byte
+	adiw zl, 3
+	lpm
+	cp pot_res_h, r0
+	brlo lower_high
+
+	; Check low byte
+	sbiw zl, 1
+	lpm 
+	cp pot_res_l, r0
+	brlo lower_high
+higher_high:
+	rjmp end_check
+lower_high:
+	ori lower_flag, 2
+
 end_check:
 	ret
 
@@ -143,6 +250,8 @@ alarm:
 	; Start buzzer
 	ldi tmp, 0b00000001
 	out portc, tmp
+	ldi tmp, 0b00000100
+	out timsk, tmp
 ack:
 	; Wait until the sw6 has been pressed
 	sbic pind, 6
@@ -152,7 +261,7 @@ ack:
 	out portc, tmp
 error:
 	; Light error led
-	ldi secs, 5
+	ldi secs, 1
 	ldi tmp, 0b11111110
 	out portb, tmp
 	rcall timer
@@ -180,6 +289,7 @@ error_timer:
 	sei
 	rcall check_for_errors
 	reti
+
 
 reset:
 	; Initialize stack pointer
@@ -210,13 +320,24 @@ reset:
 	out timsk, tmp
 
 	; Start timer for error checking
-	clr tmp
-	out tcnt0, tmp
-	ldi tmp, 0b00000101
-	out tccr0, tmp
+	;clr tmp
+	;out tcnt0, tmp
+	;ldi tmp, 0b00000101
+	;out tccr0, tmp
+
 
 main:
+	ldi secs, 1
+	rcall timer
 
+	;rcall wait_start
+	ldi pot_ind, 0
+meas:
+	rcall adc_func
+	com pot_res_l
+	out portb, pot_res_l
+	rjmp meas
+	 
 	; Timer check
 	ldi tmp, 0b10101010
 	out portb, tmp
@@ -226,16 +347,13 @@ main:
 
 	ldi tmp, 0xFF
 	out portb, tmp
-	ldi secs, 5
+	ldi secs, 4
 	rcall timer
-	; A1 check
-	;rcall check_A1
-	;rcall alarm
-	;rcall check_for_errors
+	rjmp main
 
 
 Clock_freq:
 .DW 0x3d09
 
-Low_value:
-.DW 0x0000
+Values:
+.DW 0x20
