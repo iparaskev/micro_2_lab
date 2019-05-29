@@ -1,5 +1,6 @@
 .include "m16def.inc"
 
+.def pot_gen_low_flag = r6
 .def timer_init_l = r4
 .def timer_init_h = r5
 .def timer_flag = r24
@@ -13,6 +14,7 @@
 .def pot_res_h = r22
 .def secs = r23        ; The delay seconds for the timer
 .def timer_count = r26
+.def pot_mutex = r27   ; Mutex for using the potentiometer results
 
 ; Interrupt vector for atmega16
 jmp reset
@@ -24,7 +26,6 @@ reti
 
 wait_start:
 	; wait for the switch 0 to be pushed
-	
 	clr tmp
 	out portb, tmp
 	in tmp, portd
@@ -36,66 +37,106 @@ wait_start:
 start_tape:
 	; check if the required conditions are met and start the production tape
 	; condition 1: b1 = 0
+	ldi pot_mutex, 1 ; Get mutex
+	
 	ldi pot_ind, 1
 	rcall adc_func ; read b1 value
 	rcall check_low
-	sbrc lower_flag, 0 ; if silo 1 is empty skip horn
+	mov pot_gen_low_flag, lower_flag
+	ldi pot_mutex, 0 ; Free mutex
+	sbrs pot_gen_low_flag, 0 ; if silo 1 is empty skip horn
 	rjmp wait_start
 	
+	ldi tmp, 0b11001100
+	out portb, tmp
+	ldi secs, 2
+	rcall timer
+
 	; condition 2: b3 = 0
+	ldi pot_mutex, 1 ; Get mutex
 	ldi pot_ind, 3
 	rcall adc_func ; read b3 value
 	rcall check_low
-	sbrc lower_flag, 0; if silo 2 is empty skip horn
+	mov pot_gen_low_flag, lower_flag
+	ldi pot_mutex, 0 ; Free mutex
+	sbrs pot_gen_low_flag, 0 ; if silo 2 is empty skip horn
 	rjmp wait_start
+	
+	ldi tmp, 0b11001000
+	out portb, tmp
+	ldi secs, 2
+	rcall timer
 
-	; condition 3: a1 > 0
-	;rcall check_A1
+	; condition 3: the y valve is at position y1
+	sbic pind, 1
+	rjmp wait_start
+	ldi tmp, 0b00011000
+	out portb, tmp
+	ldi secs, 2
+	rcall timer
+
+tape_run:
+	; Wait for the moving tape to take normal speed
+	; and open led 7
+	ldi tmp, 0b01111111
+	out portb, tmp
+
+	ldi secs, 7
+	rcall timer
+	
+	; Debug led to show the start of the procedure
+	ldi tmp, 0b00111111
+	out portb, tmp
+	ldi secs, 3
+	rcall timer
 	
 	; condition 4: b2 = 0 or b4 = 0
-	ldi pot_ind, 2
-	rcall adc_func ; read b2
-	rcall check_low
-	mov tmp, lower_flag
+	;ldi pot_ind, 2
+	;rcall adc_func ; read b2
+	;rcall check_low
+	;mov tmp, lower_flag
 	
-	ldi pot_ind, 4
-	rcall adc_func ; read b4
-	rcall check_low 
-	or tmp, lower_flag
+	;ldi pot_ind, 4
+	;rcall adc_func ; read b4
+	;rcall check_low 
+	;or tmp, lower_flag
 
-	sbrs tmp, 0 ; if the first bit of the or result is 1, skip horn
-	rjmp wait_start
+	;sbrs tmp, 0 ; if the first bit of the or result is 1, skip horn
+	;rjmp wait_start
 
 	;condition 5: Q2 = 0
 	;rcall check_for_errors
 
 	; if all conditions are met, open led7
-	ldi tmp, 0b01111111
-	out portb, tmp
-
-; 7 sec_timer
-	ldi secs, 7
-	rcall timer
 	
-	ldi tmp, 0b00111111
+load_silo_1:
+	ldi pot_mutex, 1 ; Get mutex
+	ldi pot_ind, 2
+	rcall adc_func
+	rcall check_low
+	mov pot_gen_low_flag, lower_flag
+	ldi pot_mutex, 0 ; Free mutex
+	sbrc pot_gen_low_flag, 1 
+	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
+
+	; switch the pump Y2
+	sbic pind, 2
+	rcall alarm
+
+	; Debug led to show the start of the procedure
+	ldi tmp, 0b00011111
 	out portb, tmp
 	ldi secs, 3
 	rcall timer
 
-load_silo_1:
-	ldi pot_ind, 2
-	rcall adc_func
-	rcall check_low
-	;sbrc lower_flag, 1
-	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
-
-; switch the pump Y2
-
 load_silo_2:
+	ldi pot_mutex, 1; Get mutex
 	ldi pot_ind, 4
 	rcall adc_func
 	rcall check_low
-	sbrc lower_flag, 1
+	mov pot_gen_low_flag, lower_flag
+	ldi pot_mutex, 0 ; Free mutex
+	sbrc pot_gen_low_flag, 1 	
 	rjmp load_silo_1; while b4 is lower than a threshold, keep loading silo 2
 	
 stop_engines:
@@ -140,9 +181,6 @@ timer:
 	; Set timer for specific delay
 	; Input:
 	;	sec	the delay time 
-
-	; Load number of commands per sec for prescaler=1024
-	; Initial clock freq is 4MHz so the new clock freq is 3096Hz
 	ldi zh, high(Clock_freq*2)
 	ldi zl, low(Clock_freq*2)
 	
@@ -199,9 +237,10 @@ check_low:
 	
 	; Check high byte
 	adiw zl, 1
-	lpm
+	lpm 
 	cp pot_res_h, r0
 	brlo lower
+	brne high_check	
 
 	; Check low byte
 	sbiw zl, 1
@@ -215,12 +254,16 @@ lower:
 
 	; Load constant
 high_check:
-	
+	; Load constant
+	ldi zh, high(Values*2)
+	ldi zl, low(Values*2)
+
 	; Check high byte
 	adiw zl, 3
 	lpm
 	cp pot_res_h, r0
 	brlo lower_high
+	brne end_check
 
 	; Check low byte
 	sbiw zl, 1
@@ -236,7 +279,7 @@ end_check:
 	ret
 
 check_A1:
-	; Function to get the value of A1 sensor
+	; Function to get the value of A1 sensor	
 	; Get measurment
 	ldi pot_ind, 0
 	rcall adc_func
@@ -275,6 +318,7 @@ error:
 
 check_for_errors:
 	; Check if potentiometer 0 is ok
+	sbrs pot_mutex, 0
 	rcall check_A1
 	; Check q1
 	sbis pind, 4
@@ -318,20 +362,21 @@ reset:
 	; Initiliaze general timer interrupts
 	ldi tmp, 0b00000101
 	out timsk, tmp
+	
+	; Init mutex
+	ldi pot_mutex, 0
 
 	; Start timer for error checking
-	;clr tmp
-	;out tcnt0, tmp
-	;ldi tmp, 0b00000101
-	;out tccr0, tmp
+	clr tmp
+	out tcnt0, tmp
+	ldi tmp, 0b00000101
+	out tccr0, tmp
 
 
 main:
 	ldi secs, 1
 	rcall timer
-
-	;rcall wait_start
-	ldi pot_ind, 0
+	rcall wait_start
 meas:
 	rcall adc_func
 	com pot_res_l
@@ -356,4 +401,4 @@ Clock_freq:
 .DW 0x3d09
 
 Values:
-.DW 0x20
+.DW 0x0020, 0x007a
