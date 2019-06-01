@@ -14,7 +14,6 @@
 .def pot_res_h = r22
 .def secs = r23        ; The delay seconds for the timer
 .def timer_count = r26
-.def pot_mutex = r27   ; Mutex for using the potentiometer results
 
 ; Interrupt vector for atmega16
 jmp reset
@@ -38,7 +37,6 @@ wait_start:
 start_tape:
 	; check if the required conditions are met and start the production tape
 	; condition 1: b1 = 0
-	;ldi pot_mutex, 1 ; Get mutex
 	ser tmp
 	out portb, tmp
 	rcall timer
@@ -49,7 +47,6 @@ start_tape:
 	rcall adc_func ; read b1 value
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
-	;ldi pot_mutex, 0 ; Free mutex
 	sbrs pot_gen_low_flag, 0 ; if silo 1 is empty skip horn
 	rjmp wait_start
 	
@@ -59,13 +56,11 @@ start_tape:
 	rcall timer
 
 	; condition 2: b3 = 0
-	;ldi pot_mutex, 1 ; Get mutex
 	rcall check_A1
 	ldi pot_ind, 3
 	rcall adc_func ; read b3 value
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
-	;ldi pot_mutex, 0 ; Free mutex
 	sbrs pot_gen_low_flag, 0 ; if silo 2 is empty skip horn
 	
 	rjmp wait_start
@@ -114,14 +109,12 @@ tape_run:
 	; if all conditions are met, open led7
 	
 load_silo_1:
-	;ldi pot_mutex, 1 ; Get mutex
 	rcall check_A1
 	ldi pot_ind, 2
 
 	rcall adc_func
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
-	;ldi pot_mutex, 0 ; Free mutex
 	sbrc pot_gen_low_flag, 1 
 	
 	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
@@ -137,13 +130,11 @@ load_silo_1:
 	rcall timer
 
 load_silo_2:
-	;ldi pot_mutex, 1; Get mutex
 	rcall check_A1
 	ldi pot_ind, 4
 	rcall adc_func
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
-	;ldi pot_mutex, 0 ; Free mutex
 	sbrc pot_gen_low_flag, 1 	
 	rjmp load_silo_2; while b4 is lower than a threshold, keep loading silo 2
 	
@@ -371,9 +362,6 @@ reset:
 	; Initiliaze general timer interrupts
 	ldi tmp, 0b00000101
 	out timsk, tmp
-	
-	; Init mutex
-	ldi pot_mutex, 0
 
 	; Start timer for error checking
 	clr tmp
