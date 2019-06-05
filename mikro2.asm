@@ -272,13 +272,19 @@ error:
 	ret 
 
 check_for_errors:
-	; Check if potentiometer 0 is ok
 
-	;rcall check_A1
+	; Wait previous measurment to finish
+wait_previous:
+	sbic adcsra, aden
+	rjmp wait_previous
+	
+	; Check if potentiometer 0 is ok
+	rcall check_A1
 
 	; Check q1
 	sbis pind, 4
 	rcall alarm
+
 	; Check q2
 	sbis pind, 5
 	rcall alarm
@@ -287,9 +293,14 @@ check_for_errors:
 error_timer:
 	; Handler to call again check_for_errors
 	sei
+	push pot_ind
+	push pot_res_l
+	push pot_res_h
 	rcall check_for_errors
+	pop pot_res_h
+	pop pot_res_l
+	pop pot_ind
 	reti
-
 
 reset:
 	; Initialize stack pointer
