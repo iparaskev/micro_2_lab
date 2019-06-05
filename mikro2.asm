@@ -50,11 +50,6 @@ start_tape:
 	sbrs pot_gen_low_flag, 0 ; if silo 1 is empty skip horn
 	rjmp wait_start
 	
-	ldi tmp, 0b11001100
-	out portb, tmp
-	ldi secs, 2
-	rcall timer
-
 	; condition 2: b3 = 0
 	rcall check_A1
 	ldi pot_ind, 3
@@ -62,14 +57,8 @@ start_tape:
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
 	sbrs pot_gen_low_flag, 0 ; if silo 2 is empty skip horn
-	
 	rjmp wait_start
 	
-	ldi tmp, 0b11001000
-	out portb, tmp
-	ldi secs, 2
-	rcall timer
-
 	; condition 3: the y valve is at position y1
 	sbic pind, 1
 	rjmp wait_start
@@ -83,51 +72,18 @@ tape_run:
 	ldi secs, 7
 	rcall timer
 	
-	; Debug led to show the start of the procedure
-	ser tmp
-	out portb, tmp
-	ldi secs, 3
-	rcall timer
-	
-	; condition 4: b2 = 0 or b4 = 0
-	;ldi pot_ind, 2
-	;rcall adc_func ; read b2
-	;rcall check_low
-	;mov tmp, lower_flag
-	
-	;ldi pot_ind, 4
-	;rcall adc_func ; read b4
-	;rcall check_low 
-	;or tmp, lower_flag
-
-	;sbrs tmp, 0 ; if the first bit of the or result is 1, skip horn
-	;rjmp wait_start
-
-	;condition 5: Q2 = 0
-	;rcall check_for_errors
-
-	; if all conditions are met, open led7
-	
 load_silo_1:
 	rcall check_A1
 	ldi pot_ind, 2
-
 	rcall adc_func
 	rcall check_low
 	mov pot_gen_low_flag, lower_flag
 	sbrc pot_gen_low_flag, 1 
-	
 	rjmp load_silo_1; while b2 is lower than a threshold, keep loading silo 1
 	
 	; switch the pump Y2
 	sbic pind, 2
 	rcall alarm
-
-	; Debug led to show the start of the procedure
-	ldi tmp, 0b00011111
-	out portb, tmp
-	ldi secs, 3
-	rcall timer
 
 load_silo_2:
 	rcall check_A1
