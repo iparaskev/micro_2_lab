@@ -27,9 +27,6 @@ wait_start:
 	; wait for the switch 0 to be pushed
 	clr tmp
 	out portb, tmp
-	;ldi secs, 1
-	;rcall timer
-	;in tmp, portd
 	rcall check_A1
 	sbic PIND, 0
 	rjmp wait_start
@@ -37,12 +34,7 @@ wait_start:
 start_tape:
 	; check if the required conditions are met and start the production tape
 	; condition 1: b1 = 0
-	ser tmp
-	out portb, tmp
-	rcall timer
-	
 	rcall check_A1
-
 	ldi pot_ind, 1
 	rcall adc_func ; read b1 value
 	rcall check_low
